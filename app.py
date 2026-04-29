@@ -3,83 +3,76 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 
-# Title and description
-st.set_page_config(page_title="AUD Currency Screener", page_icon="🇦🇺")
-st.title("🇦🇺 AUD Currency Performance Tracker")
-st.write("Checking AUD against South America, Asia, SE Asia, and E. Europe (1 Year Lookback)")
+st.set_page_config(page_title="AUD Global Currency Tracker", layout="wide")
+st.title("🇦🇺 AUD Currency Performance Screener")
 
-# Define currency pairs (AUD vs others)
-# yfinance uses 'AUDXXX=X' for AUD to Foreign Currency rates
-pairs = {
-    # South America
-    "Argentine Peso": "AUDARS=X", "Brazilian Real": "AUDBRL=X", "Chilean Peso": "AUDCLP=X", 
-    "Colombian Peso": "AUDCOP=X", "Peruvian Sol": "AUDPEN=X",
-    # Asia/SE Asia
-    "Chinese Yuan": "AUDCNY=X", "Indian Rupee": "AUDINR=X", "Indonesian Rupiah": "AUDIDR=X",
-    "Japanese Yen": "AUDJPY=X", "Malaysian Ringgit": "AUDMYR=X", "Philippine Peso": "AUDPHP=X",
-    "Singapore Dollar": "AUDSGD=X", "South Korean Won": "AUDKRW=X", "Thai Baht": "AUDTHB=X",
-    "Vietnamese Dong": "AUDVND=X",
-    # Eastern Europe
-    "Czech Koruna": "AUDCZK=X", "Hungarian Forint": "AUDHUF=X", "Polish Zloty": "AUDPLN=X",
-    "Romanian Leu": "AUDRON=X", "Turkish Lira": "AUDTRY=X", "Ukrainian Hryvnia": "AUDUAH=X"
+# Categorized Currency Lists
+regions = {
+    "Asia & SE Asia": {
+        "Chinese Yuan": "AUDCNY=X", "Indian Rupee": "AUDINR=X", "Indonesian Rupiah": "AUDIDR=X",
+        "Japanese Yen": "AUDJPY=X", "Malaysian Ringgit": "AUDMYR=X", "Philippine Peso": "AUDPHP=X",
+        "Singapore Dollar": "AUDSGD=X", "South Korean Won": "AUDKRW=X", "Thai Baht": "AUDTHB=X",
+        "Vietnamese Dong": "AUDVND=X", "Taiwan Dollar": "AUDTWD=X", "Hong Kong Dollar": "AUDHKD=X",
+        "Pakistani Rupee": "AUDPKR=X", "Sri Lankan Rupee": "AUDLKR=X", "Bangladeshi Taka": "AUDBDT=X"
+    },
+    "Eastern Europe & Caucasus": {
+        "Georgian Lari": "AUDGEL=X", "Czech Koruna": "AUDCZK=X", "Hungarian Forint": "AUDHUF=X",
+        "Polish Zloty": "AUDPLN=X", "Romanian Leu": "AUDRON=X", "Turkish Lira": "AUDTRY=X",
+        "Ukrainian Hryvnia": "AUDUAH=X", "Bulgarian Lev": "AUDBGN=X", "Serbian Dinar": "AUDRSD=X",
+        "Armenian Dram": "AUDAMD=X", "Azerbaijani Manat": "AUDAZN=X", "Kazakhstani Tenge": "AUDKZT=X"
+    },
+    "South & Central America": {
+        "Argentine Peso": "AUDARS=X", "Brazilian Real": "AUDBRL=X", "Chilean Peso": "AUDCLP=X", 
+        "Colombian Peso": "AUDCOP=X", "Peruvian Sol": "AUDPEN=X", "Mexican Peso": "AUDMXN=X",
+        "Uruguayan Peso": "AUDUYU=X", "Paraguayan Guarani": "AUDPYG=X", "Costa Rican Colon": "AUDCRC=X",
+        "Guatemalan Quetzal": "AUDGTQ=X", "Honduran Lempira": "AUDHNL=X", "Nicaraguan Cordoba": "AUDNIO=X"
+    }
 }
 
-@st.cache_data(ttl=86400) # Cache data for 24 hours
-def get_currency_data(ticker):
+@st.cache_data(ttl=86400)
+def fetch_data(ticker):
     try:
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=365)
+        data = yf.download(ticker, period="1y", multi_level_index=False)
+        if data.empty or len(data) < 2: return None
         
-        # multi_level_index=False prevents the common ValueError in new yfinance versions
-        data = yf.download(ticker, start=start_date, end=end_date, multi_level_index=False)
-        
-        if data.empty or len(data) < 2:
-            return None
-        
-        # Get the first and last available 'Close' prices
         start_price = float(data['Close'].iloc[0])
         end_price = float(data['Close'].iloc[-1])
         
-        if start_price == 0: return None
-        
-        # Calculation: How much the AUD rose against the currency
-        # (Positive % means AUD strengthened / Foreign Currency fell)
-        percent_change = ((end_price - start_price) / start_price) * 100
-        return percent_change
-    except Exception as e:
+        # % AUD rose = % Foreign Currency fell relative to AUD
+        return ((end_price - start_price) / start_price) * 100
+    except:
         return None
 
-# Process data with a progress bar
-results = []
-progress_bar = st.progress(0)
-status_text = st.empty()
+# Sidebar logic to process all data first
+st.sidebar.header("Processing Data...")
+all_results = []
+for region_name, tickers in regions.items():
+    for name, ticker in tickers.items():
+        change = fetch_data(ticker)
+        if change is not None:
+            all_results.append({"Region": region_name, "Country": name, "AUD Change %": change})
 
-for i, (name, ticker) in enumerate(pairs.items()):
-    status_text.text(f"Fetching: {name} ({ticker})")
-    change = get_currency_data(ticker)
-    if change is not None:
-        results.append({"Country/Currency": name, "AUD 1Y Change %": change})
-    progress_bar.progress((i + 1) / len(pairs))
+full_df = pd.DataFrame(all_results)
 
-status_text.text("Analysis Complete!")
-progress_bar.empty()
+# Create Tabs
+tab_summary, tab_asia, tab_europe, tab_america = st.tabs([
+    "🚨 Big Falls (>20%)", "Asia & SE Asia", "Eastern Europe", "South & Central America"
+])
 
-# Create DataFrame
-df = pd.DataFrame(results)
+with tab_summary:
+    st.subheader("Currencies that fell >20% against AUD in 1 Year")
+    big_falls = full_df[full_df["AUD Change %"] > 20].sort_values("AUD Change %", ascending=False)
+    if not big_falls.empty:
+        st.table(big_falls[["Country", "Region", "AUD Change %"]].style.format({"AUD Change %": "{:.2f}%"}))
+    else:
+        st.info("No currencies fell by more than 20% in the selected period.")
 
-# Filter for biggest falls (>20% rise in AUD value means >20% fall in that currency)
-filtered_df = df[df["AUD 1Y Change %"] > 20].sort_values(by="AUD 1Y Change %", ascending=False)
+def render_region_tab(tab_obj, region_name):
+    with tab_obj:
+        st.subheader(f"AUD Performance in {region_name}")
+        region_df = full_df[full_df["Region"] == region_name].sort_values("AUD Change %", ascending=False)
+        st.dataframe(region_df[["Country", "AUD Change %"]].style.format({"AUD Change %": "{:.2f}%"}), use_container_width=True)
 
-# Display High-Impact Results
-st.subheader("⚠️ Currencies that fell >20% against AUD (1 Year)")
-if not filtered_df.empty:
-    st.write("These countries are significantly cheaper for AUD holders than they were a year ago.")
-    st.table(filtered_df.style.format({"AUD 1Y Change %": "{:.2f}%"}))
-else:
-    st.info("No monitored currencies fell by more than 20% over the last year.")
-
-# Display All Data
-with st.expander("View Full List (All Monitored Regions)"):
-    st.dataframe(df.sort_values(by="AUD 1Y Change %", ascending=False), use_container_width=True)
-
-st.caption(f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+render_region_tab(tab_asia, "Asia & SE Asia")
+render_region_tab(tab_europe, "Eastern Europe & Caucasus")
+render_region_tab(tab_america, "South & Central America")
